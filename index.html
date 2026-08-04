@@ -408,16 +408,29 @@ async function sheetPost(payload){
 }
 
 async function addEntryToSheet(entry){
-  await sheetPost({action:'add', id:entry.id, data:entry.date, tipo:entry.type, categoria:entry.category, importo:entry.amount, nota:entry.note});
-  await fetchAllEntries();
+  const res = await sheetPost({action:'add', id:entry.id, data:entry.date, tipo:entry.type, categoria:entry.category, importo:entry.amount, nota:entry.note});
+  if(res && res.ok){
+    allEntries.push(entry);
+  } else {
+    await fetchAllEntries();
+  }
 }
 async function updateEntryInSheet(entry){
-  await sheetPost({action:'update', id:entry.id, data:entry.date, tipo:entry.type, categoria:entry.category, importo:entry.amount, nota:entry.note});
-  await fetchAllEntries();
+  const res = await sheetPost({action:'update', id:entry.id, data:entry.date, tipo:entry.type, categoria:entry.category, importo:entry.amount, nota:entry.note});
+  if(res && res.ok){
+    const idx = allEntries.findIndex(e=>e.id===entry.id);
+    if(idx>-1) allEntries[idx] = entry; else allEntries.push(entry);
+  } else {
+    await fetchAllEntries();
+  }
 }
 async function deleteEntryFromSheet(id){
-  await sheetPost({action:'delete', id});
-  await fetchAllEntries();
+  const res = await sheetPost({action:'delete', id});
+  if(res && res.ok){
+    allEntries = allEntries.filter(e=>e.id!==id);
+  } else {
+    await fetchAllEntries();
+  }
 }
 async function loadMonthEntries(mk){
   return allEntries.filter(e=>e.date && e.date.slice(0,7)===mk);
@@ -917,10 +930,12 @@ function attachHandlers(){
       }
     });
     if(toAdd.length){
-      for(const entry of toAdd){
-        await sheetPost({action:'add', id:entry.id, data:entry.date, tipo:entry.type, categoria:entry.category, importo:entry.amount, nota:entry.note});
+      const res = await sheetPost({action:'addBatch', items: toAdd.map(e=>({id:e.id, data:e.date, tipo:e.type, categoria:e.category, importo:e.amount, nota:e.note}))});
+      if(res && res.ok){
+        allEntries.push(...toAdd);
+      } else {
+        await fetchAllEntries();
       }
-      await fetchAllEntries();
       render();
     }
   };
@@ -951,7 +966,8 @@ function attachHandlers(){
       const raw = document.getElementById('bulkTextarea').value;
       const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l);
       const TYPE_MAP = {U:'uscita', E:'entrata', R:'risparmio'};
-      let okCount = 0, failCount = 0;
+      let failCount = 0;
+      const validEntries = [];
       bulkSubmitBtn.disabled = true;
       bulkSubmitBtn.textContent = 'Aggiungo...';
       for(const line of lines){
@@ -966,11 +982,19 @@ function attachHandlers(){
         if(!(CATS[tipo]||[]).some(c=>c.name.toLowerCase()===category.toLowerCase())){
           addNewCategory(tipo, category);
         }
-        const res = await sheetPost({action:'add', id:uid(), data:date, tipo, categoria:category, importo:amount, nota:note});
-        if(res && res.ok) okCount++; else failCount++;
+        validEntries.push({id:uid(), date, type:tipo, category, amount, note});
+      }
+      let okCount = 0;
+      if(validEntries.length){
+        const res = await sheetPost({action:'addBatch', items: validEntries.map(e=>({id:e.id, data:e.date, tipo:e.type, categoria:e.category, importo:e.amount, nota:e.note}))});
+        if(res && res.ok){
+          allEntries.push(...validEntries);
+          okCount = validEntries.length;
+        } else {
+          await fetchAllEntries();
+        }
       }
       if(okCount>0) await saveExtraCats();
-      await fetchAllEntries();
       bulkPanelOpen = true;
       bulkResultMsg = `<span style="color:var(--mint);font-weight:600;">${okCount} aggiunte</span>` +
         (failCount ? ` &nbsp;·&nbsp; <span style="color:var(--coral);font-weight:600;">${failCount} righe non valide</span>` : '');
@@ -987,10 +1011,15 @@ function attachHandlers(){
     }
     resetArmed = false;
     const arr = await loadMonthEntries(currentMonth);
-    for(const entry of arr){
-      await sheetPost({action:'delete', id:entry.id});
+    const ids = arr.map(e=>e.id);
+    if(ids.length){
+      const res = await sheetPost({action:'deleteBatch', ids});
+      if(res && res.ok){
+        allEntries = allEntries.filter(e=>!ids.includes(e.id));
+      } else {
+        await fetchAllEntries();
+      }
     }
-    await fetchAllEntries();
     render();
   };
   document.getElementById('prevMonth').onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,-1); render(); };
