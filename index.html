@@ -163,6 +163,16 @@ form.entry-form select:focus, form.entry-form input:focus{outline:none;border-co
 }
 .quick-add-btn:hover{border-color:var(--purple);background:rgba(108,92,231,0.06);}
 
+.tx-day-header{
+  display:flex;justify-content:space-between;align-items:baseline;
+  padding:14px 2px 6px;font-size:11.5px;font-weight:700;color:var(--ink-faint);
+  text-transform:uppercase;letter-spacing:0.04em;
+}
+.tx-day-header:first-child{padding-top:2px;}
+.tx-day-total{font-family:var(--font-display);font-weight:700;font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0;}
+.tx-day-total.pos{color:var(--mint);}
+.tx-day-total.neg{color:var(--coral);}
+
 .tx-list{max-height:300px;overflow-y:auto;padding-right:12px;margin-right:-12px;}
 .tx-row{display:flex;justify-content:space-between;align-items:center;padding:11px 2px;border-bottom:1px solid var(--border);}
 .tx-row:last-child{border-bottom:none;}
@@ -255,7 +265,7 @@ const DEFAULT_CATS = {
 const REFRESH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>`;
 const CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
 
-const APP_VERSION = '2026-08-04.2';
+const APP_VERSION = '2026-08-04.3';
 let updateAvailable = false;
 let refreshState = 'idle';
 let settings = {savingsGoal:1000, dailyBudget:25, sheetUrl:'', sheetKey:''};
@@ -546,6 +556,46 @@ function computeYearData(year){
   });
   const catEntries = Object.entries(catTotals).sort((a,b)=>b[1]-a[1]);
   return {totals, months, catEntries};
+}
+
+function formatDayHeader(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const label = d.toLocaleDateString('it-CH', {weekday:'long', day:'numeric', month:'long'});
+  return label.charAt(0).toUpperCase()+label.slice(1);
+}
+
+function renderTxGrouped(entries){
+  const sorted = entries.slice().sort((a,b)=>b.date.localeCompare(a.date) || 0);
+  const groups = [];
+  sorted.forEach(e=>{
+    let g = groups.find(g=>g.date===e.date);
+    if(!g){ g = {date:e.date, items:[]}; groups.push(g); }
+    g.items.push(e);
+  });
+  return groups.map(g=>{
+    const dayNet = g.items.reduce((s,e)=> s + (e.type==='uscita' ? -e.amount : e.amount), 0);
+    const rows = g.items.map(e=>`
+      <div class="tx-row" data-id="${e.id}">
+        <div class="tx-left">
+          <div class="tx-avatar" style="background:${catColor(e.type,e.category)};">${initials(e.category)}</div>
+          <div class="tx-info">
+            <span class="tx-cat">${e.category}${e.note?' · '+e.note:''}</span>
+            <span class="tx-date">${e.type==='risparmio'?'Risparmio':e.type==='entrata'?'Entrata':'Uscita'}</span>
+          </div>
+        </div>
+        <div class="tx-right">
+          <span class="tx-amount ${e.type==='uscita'?'exp':e.type==='entrata'?'inc':'sav'}">${e.type==='uscita'?'-':'+'}${fmtCHF(e.amount)}</span>
+          <button class="tx-del" data-edit="${e.id}" title="Modifica">✎</button>
+          <button class="tx-del" data-del="${e.id}" title="Elimina">×</button>
+        </div>
+      </div>`).join('');
+    return `
+      <div class="tx-day-header">
+        <span>${formatDayHeader(g.date)}</span>
+        <span class="tx-day-total ${dayNet>=0?'pos':'neg'}">${dayNet>=0?'+':''}${fmtCHF(dayNet)}</span>
+      </div>
+      ${rows}`;
+  }).join('');
 }
 
 function donutSVG(catEntries){
@@ -898,22 +948,7 @@ async function render(){
     <div class="card">
       <h2>Movimenti di ${monthLabel(currentMonth)}</h2>
       <div class="tx-list" id="txList">
-        ${entries.length ? entries.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(e=>`
-          <div class="tx-row" data-id="${e.id}">
-            <div class="tx-left">
-              <div class="tx-avatar" style="background:${catColor(e.type,e.category)};">${initials(e.category)}</div>
-              <div class="tx-info">
-                <span class="tx-cat">${e.category}${e.note?' · '+e.note:''}</span>
-                <span class="tx-date">${e.date}</span>
-              </div>
-            </div>
-            <div class="tx-right">
-              <span class="tx-amount ${e.type==='uscita'?'exp':e.type==='entrata'?'inc':'sav'}">${e.type==='uscita'?'-':'+'}${fmtCHF(e.amount)}</span>
-              <button class="tx-del" data-edit="${e.id}" title="Modifica">✎</button>
-              <button class="tx-del" data-del="${e.id}" title="Elimina">×</button>
-            </div>
-          </div>
-        `).join('') : '<div class="tx-empty">Ancora nessun movimento. Aggiungine uno qui sopra.</div>'}
+        ${entries.length ? renderTxGrouped(entries) : '<div class="tx-empty">Ancora nessun movimento. Aggiungine uno qui sopra.</div>'}
       </div>
     </div>
 
