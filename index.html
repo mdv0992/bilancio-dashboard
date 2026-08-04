@@ -173,7 +173,7 @@ form.entry-form select:focus, form.entry-form input:focus{outline:none;border-co
 .tx-day-total.pos{color:var(--mint);}
 .tx-day-total.neg{color:var(--coral);}
 
-.tx-list{max-height:300px;overflow-y:auto;padding-right:12px;margin-right:-12px;}
+.tx-list{}
 .tx-row{display:flex;justify-content:space-between;align-items:center;padding:11px 2px;border-bottom:1px solid var(--border);}
 .tx-row:last-child{border-bottom:none;}
 .tx-left{display:flex;align-items:center;gap:12px;}
@@ -265,9 +265,10 @@ const DEFAULT_CATS = {
 const REFRESH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>`;
 const CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
 
-const APP_VERSION = '2026-08-04.3';
+const APP_VERSION = '2026-08-04.4';
 let updateAvailable = false;
 let refreshState = 'idle';
+let txVisibleCount = 8;
 let settings = {savingsGoal:1000, dailyBudget:25, sheetUrl:'', sheetKey:''};
 let currentMonth = monthKey(new Date());
 let selectedType = 'uscita';
@@ -566,21 +567,15 @@ function formatDayHeader(dateStr){
 
 function renderTxGrouped(entries){
   const sorted = entries.slice().sort((a,b)=>b.date.localeCompare(a.date) || 0);
-  const groups = [];
-  sorted.forEach(e=>{
-    let g = groups.find(g=>g.date===e.date);
-    if(!g){ g = {date:e.date, items:[]}; groups.push(g); }
-    g.items.push(e);
-  });
-  return groups.map(g=>{
-    const dayNet = g.items.reduce((s,e)=> s + (e.type==='uscita' ? -e.amount : e.amount), 0);
-    const rows = g.items.map(e=>`
+  const visible = sorted.slice(0, txVisibleCount);
+  const remaining = sorted.length - visible.length;
+  const rows = visible.map(e=>`
       <div class="tx-row" data-id="${e.id}">
         <div class="tx-left">
           <div class="tx-avatar" style="background:${catColor(e.type,e.category)};">${initials(e.category)}</div>
           <div class="tx-info">
             <span class="tx-cat">${e.category}${e.note?' · '+e.note:''}</span>
-            <span class="tx-date">${e.type==='risparmio'?'Risparmio':e.type==='entrata'?'Entrata':'Uscita'}</span>
+            <span class="tx-date">${e.date}</span>
           </div>
         </div>
         <div class="tx-right">
@@ -589,13 +584,10 @@ function renderTxGrouped(entries){
           <button class="tx-del" data-del="${e.id}" title="Elimina">×</button>
         </div>
       </div>`).join('');
-    return `
-      <div class="tx-day-header">
-        <span>${formatDayHeader(g.date)}</span>
-        <span class="tx-day-total ${dayNet>=0?'pos':'neg'}">${dayNet>=0?'+':''}${fmtCHF(dayNet)}</span>
-      </div>
-      ${rows}`;
-  }).join('');
+  const moreBtn = remaining>0
+    ? `<button type="button" class="fixed-add-btn" id="showMoreTxBtn" style="width:100%;text-align:center;margin-top:6px;">Mostra altri ${Math.min(remaining,10)} movimenti (${remaining} rimanenti)</button>`
+    : (txVisibleCount>8 ? `<button type="button" class="fixed-add-btn" id="showLessTxBtn" style="width:100%;text-align:center;margin-top:6px;">Mostra meno</button>` : '');
+  return rows + moreBtn;
 }
 
 function donutSVG(catEntries){
@@ -1231,7 +1223,7 @@ function attachHandlers(){
     }
   };
   const prevMonthBtn = document.getElementById('prevMonth');
-  if(prevMonthBtn){ prevMonthBtn.onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,-1); render(); }; }
+  if(prevMonthBtn){ prevMonthBtn.onclick = ()=>{ resetArmed=false; txVisibleCount=8; currentMonth = shiftMonth(currentMonth,-1); render(); }; }
 
   const viewModeMonthBtn = document.getElementById('viewModeMonth');
   if(viewModeMonthBtn){ viewModeMonthBtn.onclick = ()=>{ yearViewOpen = false; render(); }; }
@@ -1242,7 +1234,7 @@ function attachHandlers(){
   const nextYearBtn = document.getElementById('nextYear');
   if(nextYearBtn){ nextYearBtn.onclick = ()=>{ currentYear++; render(); }; }
   const nextMonthBtn = document.getElementById('nextMonth');
-  if(nextMonthBtn){ nextMonthBtn.onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,1); render(); }; }
+  if(nextMonthBtn){ nextMonthBtn.onclick = ()=>{ resetArmed=false; txVisibleCount=8; currentMonth = shiftMonth(currentMonth,1); render(); }; }
 
   document.querySelectorAll('#typeSegmented button').forEach(btn=>{
     btn.onclick = ()=>{
@@ -1309,6 +1301,11 @@ function attachHandlers(){
     render();
   };
   }
+
+  const showMoreTxBtn = document.getElementById('showMoreTxBtn');
+  if(showMoreTxBtn){ showMoreTxBtn.onclick = ()=>{ txVisibleCount += 10; render(); }; }
+  const showLessTxBtn = document.getElementById('showLessTxBtn');
+  if(showLessTxBtn){ showLessTxBtn.onclick = ()=>{ txVisibleCount = 8; render(); }; }
 
   document.querySelectorAll('[data-edit]').forEach(btn=>{
     btn.onclick = async ()=>{
