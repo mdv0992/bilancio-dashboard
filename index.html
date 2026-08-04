@@ -308,6 +308,16 @@ async function lsSet(key, value){
   catch(e){ return null; }
 }
 
+function parseHashConfig(){
+  const hash = window.location.hash.replace(/^#/, '');
+  if(!hash) return null;
+  const params = new URLSearchParams(hash);
+  const u = params.get('u');
+  const k = params.get('k');
+  if(!u) return null;
+  return {url: decodeURIComponent(u), key: k ? decodeURIComponent(k) : ''};
+}
+
 async function loadSettings(){
   try{
     const r = await lsGet('settings');
@@ -597,6 +607,15 @@ async function render(){
       </div>
 
       <button class="submit-btn" id="saveSettingsBtn" style="margin-top:4px;">Salva impostazioni e voci fisse</button>
+      ${settings.sheetUrl ? `
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+        <div class="fixed-section-label">Link "a prova di browser"</div>
+        <div style="font-size:12px;color:var(--ink-faint);margin-bottom:8px;line-height:1.5;">Salva QUESTO link come segnalibro (invece del link normale): porta con sé il collegamento al foglio, così funziona anche se il browser cancella i dati salvati.</div>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="stableLinkOutput" readonly value="${window.location.origin}${window.location.pathname}#u=${encodeURIComponent(settings.sheetUrl)}&k=${encodeURIComponent(settings.sheetKey||'')}" style="flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 10px;font-size:11px;font-family:var(--font-body);">
+          <button type="button" class="reset-btn" id="copyStableLinkBtn" style="margin-top:0;color:var(--purple);">Copia</button>
+        </div>
+      </div>` : ''}
       <button class="reset-btn" id="resetMonthBtn">${resetArmed ? 'Sicuro? Clicca di nuovo per confermare' : 'Azzera i movimenti di '+monthLabel(currentMonth)}</button>
     </div>
 
@@ -844,6 +863,22 @@ function attachHandlers(){
     if(sheetUrlChanged) await fetchAllEntries();
     render();
   };
+
+  const copyStableLinkBtn = document.getElementById('copyStableLinkBtn');
+  if(copyStableLinkBtn){
+    copyStableLinkBtn.onclick = ()=>{
+      const input = document.getElementById('stableLinkOutput');
+      input.select();
+      input.setSelectionRange(0, 99999);
+      try{
+        navigator.clipboard.writeText(input.value);
+        copyStableLinkBtn.textContent = 'Copiato ✓';
+        setTimeout(()=>{ copyStableLinkBtn.textContent = 'Copia'; }, 2000);
+      }catch(e){
+        document.execCommand('copy');
+      }
+    };
+  }
   document.getElementById('addIncomeRow').onclick = ()=>{
     document.getElementById('fixedIncomeRows').insertAdjacentHTML('beforeend',
       fixedRowHTML('entrata', 999, {label:'', category:CATS.entrata[0].name, amount:0}));
@@ -1049,6 +1084,12 @@ function attachHandlers(){
 
 (async function init(){
   await loadSettings();
+  const hashConfig = parseHashConfig();
+  if(hashConfig){
+    settings.sheetUrl = hashConfig.url;
+    settings.sheetKey = hashConfig.key;
+    await saveSettings();
+  }
   await loadFixedItems();
   await loadExtraCats();
   await fetchAllEntries();
