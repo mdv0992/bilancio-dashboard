@@ -727,12 +727,18 @@ async function render(){
       <button class="reset-btn" id="resetMonthBtn">${resetArmed ? 'Sicuro? Clicca di nuovo per confermare' : 'Azzera i movimenti di '+monthLabel(currentMonth)}</button>
     </div>
 
+    <div class="segmented" style="max-width:200px;margin:0 auto 14px;">
+      <button type="button" id="viewModeMonth" class="${!yearViewOpen?'active':''}">Mese</button>
+      <button type="button" id="viewModeYear" class="${yearViewOpen?'active':''}">Anno</button>
+    </div>
+
+    ${!yearViewOpen ? `
     <div class="month-nav">
       <button id="prevMonth">‹</button>
       <span class="month-label">${monthLabel(currentMonth)}</span>
       <button id="nextMonth">›</button>
-      <button class="gear-btn" id="toggleYearView" style="margin-left:auto;padding:6px 10px;font-size:12px;">📅 ${yearViewOpen ? 'Vista mensile' : 'Vista annuale'}</button>
     </div>
+    ` : ''}
 
     ${yearViewOpen ? renderYearView() : ''}
 
@@ -1012,7 +1018,9 @@ function attachHandlers(){
   });
   attachFixedRowRemovers();
 
-  document.getElementById('addFixedBtn').onclick = async ()=>{
+  const addFixedBtn = document.getElementById('addFixedBtn');
+  if(addFixedBtn){
+  addFixedBtn.onclick = async ()=>{
     const arr = await loadMonthEntries(currentMonth);
     const existing = new Set(arr.map(e=>(e.note||'')+'|'+e.type));
     const dateForFixed = currentMonth===monthKey(new Date()) ? todayStr() : currentMonth+'-01';
@@ -1043,6 +1051,7 @@ function attachHandlers(){
         });
     }
   };
+  }
 
   const toggleBulkBtn = document.getElementById('toggleBulkBtn');
   if(toggleBulkBtn){
@@ -1134,17 +1143,19 @@ function attachHandlers(){
       render();
     }
   };
-  document.getElementById('prevMonth').onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,-1); render(); };
+  const prevMonthBtn = document.getElementById('prevMonth');
+  if(prevMonthBtn){ prevMonthBtn.onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,-1); render(); }; }
 
-  const toggleYearViewBtn = document.getElementById('toggleYearView');
-  if(toggleYearViewBtn){
-    toggleYearViewBtn.onclick = ()=>{ yearViewOpen = !yearViewOpen; render(); };
-  }
+  const viewModeMonthBtn = document.getElementById('viewModeMonth');
+  if(viewModeMonthBtn){ viewModeMonthBtn.onclick = ()=>{ yearViewOpen = false; render(); }; }
+  const viewModeYearBtn = document.getElementById('viewModeYear');
+  if(viewModeYearBtn){ viewModeYearBtn.onclick = ()=>{ yearViewOpen = true; render(); }; }
   const prevYearBtn = document.getElementById('prevYear');
   if(prevYearBtn){ prevYearBtn.onclick = ()=>{ currentYear--; render(); }; }
   const nextYearBtn = document.getElementById('nextYear');
   if(nextYearBtn){ nextYearBtn.onclick = ()=>{ currentYear++; render(); }; }
-  document.getElementById('nextMonth').onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,1); render(); };
+  const nextMonthBtn = document.getElementById('nextMonth');
+  if(nextMonthBtn){ nextMonthBtn.onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,1); render(); }; }
 
   document.querySelectorAll('#typeSegmented button').forEach(btn=>{
     btn.onclick = ()=>{
@@ -1155,7 +1166,9 @@ function attachHandlers(){
     };
   });
 
-  document.getElementById('catSelect').onchange = (e)=>{
+  const catSelectEl = document.getElementById('catSelect');
+  if(catSelectEl){
+  catSelectEl.onchange = (e)=>{
     const wrap = document.getElementById('newCatWrap');
     if(e.target.value === '__new__'){
       wrap.classList.remove('hidden');
@@ -1164,7 +1177,10 @@ function attachHandlers(){
       wrap.classList.add('hidden');
     }
   };
-  document.getElementById('confirmNewCatBtn').onclick = async ()=>{
+  }
+  const confirmNewCatBtn = document.getElementById('confirmNewCatBtn');
+  if(confirmNewCatBtn){
+  confirmNewCatBtn.onclick = async ()=>{
     const name = document.getElementById('newCatInput').value.trim();
     if(!name) return;
     addNewCategory(selectedType, name);
@@ -1172,12 +1188,18 @@ function attachHandlers(){
     document.getElementById('catSelect').innerHTML = catOptionsFor(selectedType, name);
     document.getElementById('newCatWrap').classList.add('hidden');
   };
-  document.getElementById('cancelNewCatBtn').onclick = ()=>{
+  }
+  const cancelNewCatBtn = document.getElementById('cancelNewCatBtn');
+  if(cancelNewCatBtn){
+  cancelNewCatBtn.onclick = ()=>{
     document.getElementById('catSelect').value = (CATS[selectedType]||[])[0]?.name || '';
     document.getElementById('newCatWrap').classList.add('hidden');
   };
+  }
 
-  document.getElementById('entryForm').onsubmit = async (e)=>{
+  const entryFormEl = document.getElementById('entryForm');
+  if(entryFormEl){
+  entryFormEl.onsubmit = async (e)=>{
     e.preventDefault();
     const catVal = document.getElementById('catSelect').value;
     if(catVal === '__new__') return;
@@ -1199,6 +1221,7 @@ function attachHandlers(){
     }
     render();
   };
+  }
 
   document.querySelectorAll('[data-edit]').forEach(btn=>{
     btn.onclick = async ()=>{
