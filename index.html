@@ -242,7 +242,7 @@ const DEFAULT_CATS = {
   ]
 };
 
-let settings = {savingsGoal:1000, dailyBudget:25, sheetUrl:''};
+let settings = {savingsGoal:1000, dailyBudget:25, sheetUrl:'', sheetKey:''};
 let currentMonth = monthKey(new Date());
 let selectedType = 'uscita';
 let editingId = null;
@@ -253,6 +253,9 @@ let allEntries = [];
 let sheetError = null;
 let catBreakdownView = 'bar';
 let histView = 'risparmio';
+let bulkPanelOpen = false;
+let bulkResultMsg = '';
+let bulkText = '';
 let EXTRA_CATS = {uscita:[], entrata:[], risparmio:[]};
 let CATS = {uscita:[], entrata:[], risparmio:[]};
 const NEW_CAT_PALETTE = ['#00B8D9','#845EC2','#2C73D2','#D65DB1','#4B4453','#009EFA','#F9A826','#2FA88A'];
@@ -353,9 +356,11 @@ async function fetchAllEntries(){
   sheetError = null;
   if(!settings.sheetUrl){ allEntries = []; return allEntries; }
   try{
-    const res = await fetch(settings.sheetUrl);
+    const url = settings.sheetUrl + '?key=' + encodeURIComponent(settings.sheetKey||'');
+    const res = await fetch(url);
     if(!res.ok) throw new Error('HTTP '+res.status);
     const rows = await res.json();
+    if(rows && rows.error){ throw new Error(rows.error); }
     allEntries = rows.map(r=>({
       id: String(r.id),
       date: String(r.data).slice(0,10),
@@ -366,7 +371,7 @@ async function fetchAllEntries(){
     }));
   }catch(e){
     console.error('Errore caricamento dal foglio', e);
-    sheetError = 'Non riesco a leggere il foglio. Controlla il link nelle impostazioni.';
+    sheetError = 'Non riesco a leggere il foglio. Controlla il link e la chiave nelle impostazioni.';
   }
   return allEntries;
 }
@@ -374,14 +379,20 @@ async function fetchAllEntries(){
 async function sheetPost(payload){
   if(!settings.sheetUrl) return null;
   try{
-    return await fetch(settings.sheetUrl, {
+    const res = await fetch(settings.sheetUrl, {
       method:'POST',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify(payload)
+      body: JSON.stringify({...payload, key: settings.sheetKey||''})
     });
+    const data = await res.clone().json().catch(()=>null);
+    if(data && data.error){
+      sheetError = 'Chiave di sicurezza non valida. Controlla le impostazioni.';
+      return null;
+    }
+    return res;
   }catch(e){
     console.error('Errore invio al foglio', e);
-    sheetError = 'Non riesco a scrivere sul foglio. Controlla il link nelle impostazioni.';
+    sheetError = 'Non riesco a scrivere sul foglio. Controlla il link e la chiave nelle impostazioni.';
     return null;
   }
 }
@@ -536,10 +547,11 @@ async function render(){
     ${!settings.sheetUrl ? `
     <div class="card" style="border-color:var(--amber);">
       <h2 style="color:var(--amber);">Collega il foglio Google</h2>
-      <div style="font-size:13.5px;color:var(--ink-dim);">Per vedere i movimenti aggiunti da Telegram (e sincronizzare tutto), incolla qui il link del tuo foglio, poi salva.</div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <input type="text" id="sheetUrlQuickInput" placeholder="https://script.google.com/macros/s/.../exec" style="flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;">
-        <button class="submit-btn" id="saveSheetUrlBtn" style="width:auto;padding:10px 16px;margin-top:0;">Salva</button>
+      <div style="font-size:13.5px;color:var(--ink-dim);">Per vedere i movimenti aggiunti da Telegram (e sincronizzare tutto), incolla qui il link del tuo foglio e la chiave di sicurezza, poi salva.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+        <input type="text" id="sheetUrlQuickInput" placeholder="https://script.google.com/macros/s/.../exec" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;">
+        <input type="text" id="sheetKeyQuickInput" placeholder="Chiave di sicurezza" style="background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:9px 12px;">
+        <button class="submit-btn" id="saveSheetUrlBtn" style="margin-top:0;">Salva</button>
       </div>
     </div>` : ''}
     ${sheetError ? `<div class="card" style="border-color:var(--coral);"><div style="color:var(--coral);font-size:13.5px;font-weight:600;">⚠️ ${sheetError}</div></div>` : ''}
@@ -549,6 +561,10 @@ async function render(){
       <div class="settings-row" style="align-items:flex-start;">
         <span>Link del foglio Google (per sincronizzare con Telegram)</span>
         <input type="text" id="sheetUrlInput" value="${settings.sheetUrl||''}" placeholder="https://script.google.com/macros/s/.../exec" style="width:220px;text-align:left;font-family:var(--font-body);font-weight:400;">
+      </div>
+      <div class="settings-row" style="align-items:flex-start;">
+        <span>Chiave di sicurezza del foglio</span>
+        <input type="text" id="sheetKeyInput" value="${settings.sheetKey||''}" placeholder="Chiave di sicurezza" style="width:220px;text-align:left;font-family:var(--font-body);font-weight:400;">
       </div>
       <div class="settings-row">
         <span>Obiettivo di risparmio mensile</span>
@@ -655,19 +671,19 @@ async function render(){
       <button type="button" class="quick-add-btn" id="addFixedBtn">+ Aggiungi stipendio e spese fisse di ${monthLabel(currentMonth)}</button>
       <button type="button" class="quick-add-btn" id="toggleBulkBtn" style="margin-top:-6px;">📋 Inserimento multiplo (spese di giorni passati)</button>
 
-      <div class="card hidden" id="bulkPanel" style="background:var(--surface-2);box-shadow:none;">
+      <div class="card ${bulkPanelOpen?'':'hidden'}" id="bulkPanel" style="background:var(--surface-2);box-shadow:none;">
         <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:10px;line-height:1.5;">
           Scrivi una riga per ogni movimento, in questo formato:<br>
           <code style="background:var(--surface);padding:2px 6px;border-radius:6px;">DATA; TIPO; IMPORTO; CATEGORIA; NOTA</code><br>
           dove TIPO è U (uscita), E (entrata) o R (risparmio). Esempio:<br>
           <code style="background:var(--surface);padding:2px 6px;border-radius:6px;display:inline-block;margin-top:4px;">2026-07-28; U; 15.50; Ristoranti e bar; pranzo<br>2026-07-29; U; 8; Trasporti; bus</code>
         </div>
-        <textarea id="bulkTextarea" rows="6" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-family:var(--font-body);font-size:13px;resize:vertical;" placeholder="2026-07-28; U; 15.50; Ristoranti e bar; pranzo"></textarea>
+        <textarea id="bulkTextarea" rows="6" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-family:var(--font-body);font-size:13px;resize:vertical;" placeholder="2026-07-28; U; 15.50; Ristoranti e bar; pranzo">${bulkText}</textarea>
         <div style="display:flex;gap:8px;margin-top:10px;">
           <button type="button" class="submit-btn" id="bulkSubmitBtn" style="width:auto;padding:10px 16px;margin-top:0;">Aggiungi tutte le righe</button>
           <button type="button" class="reset-btn" id="bulkCancelBtn" style="margin-top:0;">Annulla</button>
         </div>
-        <div id="bulkResult" style="font-size:12.5px;margin-top:10px;"></div>
+        <div id="bulkResult" style="font-size:12.5px;margin-top:10px;">${bulkResultMsg}</div>
       </div>
 
       <div class="segmented" id="typeSegmented">
@@ -793,8 +809,10 @@ function attachHandlers(){
   if(quickSaveBtn){
     quickSaveBtn.onclick = async ()=>{
       const url = document.getElementById('sheetUrlQuickInput').value.trim();
+      const key = document.getElementById('sheetKeyQuickInput').value.trim();
       if(!url) return;
       settings.sheetUrl = url;
+      settings.sheetKey = key;
       await saveSettings();
       await fetchAllEntries();
       render();
@@ -807,8 +825,10 @@ function attachHandlers(){
 
   document.getElementById('saveSettingsBtn').onclick = async ()=>{
     const newSheetUrl = document.getElementById('sheetUrlInput').value.trim();
-    const sheetUrlChanged = newSheetUrl !== (settings.sheetUrl||'');
+    const newSheetKey = document.getElementById('sheetKeyInput').value.trim();
+    const sheetUrlChanged = newSheetUrl !== (settings.sheetUrl||'') || newSheetKey !== (settings.sheetKey||'');
     settings.sheetUrl = newSheetUrl;
+    settings.sheetKey = newSheetKey;
     settings.savingsGoal = Number(document.getElementById('goalInput').value)||1000;
     settings.dailyBudget = Number(document.getElementById('budgetInput').value)||25;
     await saveSettings();
@@ -873,15 +893,21 @@ function attachHandlers(){
   const toggleBulkBtn = document.getElementById('toggleBulkBtn');
   if(toggleBulkBtn){
     toggleBulkBtn.onclick = ()=>{
-      document.getElementById('bulkPanel').classList.toggle('hidden');
+      bulkPanelOpen = !bulkPanelOpen;
+      render();
     };
+  }
+  const bulkTextareaEl = document.getElementById('bulkTextarea');
+  if(bulkTextareaEl){
+    bulkTextareaEl.oninput = (e)=>{ bulkText = e.target.value; };
   }
   const bulkCancelBtn = document.getElementById('bulkCancelBtn');
   if(bulkCancelBtn){
     bulkCancelBtn.onclick = ()=>{
-      document.getElementById('bulkPanel').classList.add('hidden');
-      document.getElementById('bulkTextarea').value = '';
-      document.getElementById('bulkResult').textContent = '';
+      bulkPanelOpen = false;
+      bulkText = '';
+      bulkResultMsg = '';
+      render();
     };
   }
   const bulkSubmitBtn = document.getElementById('bulkSubmitBtn');
@@ -905,17 +931,15 @@ function attachHandlers(){
         if(!(CATS[tipo]||[]).some(c=>c.name.toLowerCase()===category.toLowerCase())){
           addNewCategory(tipo, category);
         }
-        await sheetPost({action:'add', id:uid(), data:date, tipo, categoria:category, importo:amount, nota:note});
-        okCount++;
+        const res = await sheetPost({action:'add', id:uid(), data:date, tipo, categoria:category, importo:amount, nota:note});
+        if(res && res.ok) okCount++; else failCount++;
       }
       if(okCount>0) await saveExtraCats();
       await fetchAllEntries();
-      bulkSubmitBtn.disabled = false;
-      bulkSubmitBtn.textContent = 'Aggiungi tutte le righe';
-      document.getElementById('bulkResult').innerHTML =
-        `<span style="color:var(--mint);font-weight:600;">${okCount} aggiunte</span>` +
+      bulkPanelOpen = true;
+      bulkResultMsg = `<span style="color:var(--mint);font-weight:600;">${okCount} aggiunte</span>` +
         (failCount ? ` &nbsp;·&nbsp; <span style="color:var(--coral);font-weight:600;">${failCount} righe non valide</span>` : '');
-      if(okCount>0) document.getElementById('bulkTextarea').value = '';
+      bulkText = okCount>0 ? '' : raw;
       render();
     };
   }
