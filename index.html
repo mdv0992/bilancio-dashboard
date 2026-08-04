@@ -653,6 +653,22 @@ async function render(){
     <div class="card">
       <h2>Aggiungi movimento</h2>
       <button type="button" class="quick-add-btn" id="addFixedBtn">+ Aggiungi stipendio e spese fisse di ${monthLabel(currentMonth)}</button>
+      <button type="button" class="quick-add-btn" id="toggleBulkBtn" style="margin-top:-6px;">📋 Inserimento multiplo (spese di giorni passati)</button>
+
+      <div class="card hidden" id="bulkPanel" style="background:var(--surface-2);box-shadow:none;">
+        <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:10px;line-height:1.5;">
+          Scrivi una riga per ogni movimento, in questo formato:<br>
+          <code style="background:var(--surface);padding:2px 6px;border-radius:6px;">DATA; TIPO; IMPORTO; CATEGORIA; NOTA</code><br>
+          dove TIPO è U (uscita), E (entrata) o R (risparmio). Esempio:<br>
+          <code style="background:var(--surface);padding:2px 6px;border-radius:6px;display:inline-block;margin-top:4px;">2026-07-28; U; 15.50; Ristoranti e bar; pranzo<br>2026-07-29; U; 8; Trasporti; bus</code>
+        </div>
+        <textarea id="bulkTextarea" rows="6" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-family:var(--font-body);font-size:13px;resize:vertical;" placeholder="2026-07-28; U; 15.50; Ristoranti e bar; pranzo"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button type="button" class="submit-btn" id="bulkSubmitBtn" style="width:auto;padding:10px 16px;margin-top:0;">Aggiungi tutte le righe</button>
+          <button type="button" class="reset-btn" id="bulkCancelBtn" style="margin-top:0;">Annulla</button>
+        </div>
+        <div id="bulkResult" style="font-size:12.5px;margin-top:10px;"></div>
+      </div>
 
       <div class="segmented" id="typeSegmented">
         <button type="button" data-val="uscita" class="${selectedType==='uscita'?'active':''}">Uscita</button>
@@ -853,6 +869,56 @@ function attachHandlers(){
       render();
     }
   };
+
+  const toggleBulkBtn = document.getElementById('toggleBulkBtn');
+  if(toggleBulkBtn){
+    toggleBulkBtn.onclick = ()=>{
+      document.getElementById('bulkPanel').classList.toggle('hidden');
+    };
+  }
+  const bulkCancelBtn = document.getElementById('bulkCancelBtn');
+  if(bulkCancelBtn){
+    bulkCancelBtn.onclick = ()=>{
+      document.getElementById('bulkPanel').classList.add('hidden');
+      document.getElementById('bulkTextarea').value = '';
+      document.getElementById('bulkResult').textContent = '';
+    };
+  }
+  const bulkSubmitBtn = document.getElementById('bulkSubmitBtn');
+  if(bulkSubmitBtn){
+    bulkSubmitBtn.onclick = async ()=>{
+      const raw = document.getElementById('bulkTextarea').value;
+      const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l);
+      const TYPE_MAP = {U:'uscita', E:'entrata', R:'risparmio'};
+      let okCount = 0, failCount = 0;
+      bulkSubmitBtn.disabled = true;
+      bulkSubmitBtn.textContent = 'Aggiungo...';
+      for(const line of lines){
+        const parts = line.split(';').map(p=>p.trim());
+        if(parts.length < 4){ failCount++; continue; }
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(parts[0]) ? parts[0] : null;
+        const tipo = TYPE_MAP[parts[1].toUpperCase()];
+        const amount = Number(parts[2].replace(',', '.'));
+        const category = parts[3];
+        const note = parts[4] || '';
+        if(!date || !tipo || !amount || amount<=0 || !category){ failCount++; continue; }
+        if(!(CATS[tipo]||[]).some(c=>c.name.toLowerCase()===category.toLowerCase())){
+          addNewCategory(tipo, category);
+        }
+        await sheetPost({action:'add', id:uid(), data:date, tipo, categoria:category, importo:amount, nota:note});
+        okCount++;
+      }
+      if(okCount>0) await saveExtraCats();
+      await fetchAllEntries();
+      bulkSubmitBtn.disabled = false;
+      bulkSubmitBtn.textContent = 'Aggiungi tutte le righe';
+      document.getElementById('bulkResult').innerHTML =
+        `<span style="color:var(--mint);font-weight:600;">${okCount} aggiunte</span>` +
+        (failCount ? ` &nbsp;·&nbsp; <span style="color:var(--coral);font-weight:600;">${failCount} righe non valide</span>` : '');
+      if(okCount>0) document.getElementById('bulkTextarea').value = '';
+      render();
+    };
+  }
 
   document.getElementById('resetMonthBtn').onclick = async ()=>{
     if(!resetArmed){
