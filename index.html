@@ -253,6 +253,8 @@ let allEntries = [];
 let sheetError = null;
 let catBreakdownView = 'bar';
 let histView = 'risparmio';
+let yearViewOpen = false;
+let currentYear = new Date().getFullYear();
 let bulkPanelOpen = false;
 let bulkResultMsg = '';
 let bulkText = '';
@@ -499,6 +501,24 @@ function todayStr(){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 
+function computeYearData(year){
+  const yearEntries = allEntries.filter(e=>e.date && e.date.slice(0,4)===String(year));
+  const totals = computeTotals(yearEntries);
+  const months = [];
+  for(let m=1;m<=12;m++){
+    const mk = year+'-'+String(m).padStart(2,'0');
+    const es = yearEntries.filter(e=>e.date.slice(0,7)===mk);
+    const t = computeTotals(es);
+    months.push({mk, ...t});
+  }
+  const catTotals = {};
+  yearEntries.filter(e=>e.type==='uscita').forEach(e=>{
+    catTotals[e.category] = (catTotals[e.category]||0) + (Number(e.amount)||0);
+  });
+  const catEntries = Object.entries(catTotals).sort((a,b)=>b[1]-a[1]);
+  return {totals, months, catEntries};
+}
+
 function donutSVG(catEntries){
   const total = catEntries.reduce((s,[,amt])=>s+amt,0) || 1;
   const r = 60, cx = 80, cy = 80, circ = 2*Math.PI*r;
@@ -528,6 +548,69 @@ function catOptionsFor(type, selected) {
   return (CATS[type]||[]).map(c=>
       `<option value="${c.name}" ${c.name===selected?'selected':''}>${c.name}</option>`
     ).join('') + `<option value="__new__">+ Nuova categoria…</option>`;
+}
+
+function renderYearView(){
+  const {totals, months, catEntries} = computeYearData(currentYear);
+  const goal = settings.savingsGoal || 1000;
+  const maxHist = Math.max(goal, ...months.map(m=>m.sav), 1);
+  const maxCat = catEntries.length ? catEntries[0][1] : 1;
+  const monthShort = ['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+
+  return `
+    <div class="month-nav" style="margin-top:-6px;">
+      <button id="prevYear">‹</button>
+      <span class="month-label">${currentYear}</span>
+      <button id="nextYear">›</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label"><span class="stat-dot" style="background:var(--mint);"></span>Entrate anno</div>
+        <div class="stat-val pos">${fmtCHF(totals.inc)}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><span class="stat-dot" style="background:var(--coral);"></span>Uscite anno</div>
+        <div class="stat-val neg">${fmtCHF(totals.exp)}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label"><span class="stat-dot" style="background:var(--purple);"></span>Risparmiato anno</div>
+        <div class="stat-val neutral">${fmtCHF(totals.sav)}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Risparmio mese per mese</h2>
+      <div class="hist-chart">
+        ${months.map(m=>{
+          const barPct = Math.min(100,(m.sav/maxHist)*100);
+          const goalPct = Math.min(100,(goal/maxHist)*100);
+          return `
+          <div class="hist-col">
+            <div class="hist-bar-wrap">
+              <div class="hist-goal-line" style="bottom:${goalPct}%;"></div>
+              <div class="hist-bar" style="height:${Math.max(2,barPct)}%;background:${m.mk===currentMonth?'var(--purple)':'var(--blue)'};"></div>
+            </div>
+            <div class="hist-label">${monthShort[Number(m.mk.slice(5,7))-1]}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--ink-faint);margin-top:8px;">— linea tratteggiata: obiettivo mensile (${fmtCHF(goal)})</div>
+    </div>
+
+    <div class="card">
+      <h2>Spese per categoria (tutto l'anno)</h2>
+      ${catEntries.length ? catEntries.map(([name,amt])=>`
+        <div class="cat-row">
+          <div class="cat-row-top">
+            <span class="cat-name"><span class="cat-dot" style="background:${catColor('uscita',name)};"></span>${name}</span>
+            <span class="cat-amount">${fmtCHF(amt)}</span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(4,(amt/maxCat)*100)}%;background:${catColor('uscita',name)};"></div></div>
+        </div>
+      `).join('') : '<div class="tx-empty">Nessuna spesa registrata in questo anno.</div>'}
+    </div>
+  `;
 }
 
 async function render(){
@@ -648,8 +731,12 @@ async function render(){
       <button id="prevMonth">‹</button>
       <span class="month-label">${monthLabel(currentMonth)}</span>
       <button id="nextMonth">›</button>
+      <button class="gear-btn" id="toggleYearView" style="margin-left:auto;padding:6px 10px;font-size:12px;">📅 ${yearViewOpen ? 'Vista mensile' : 'Vista annuale'}</button>
     </div>
 
+    ${yearViewOpen ? renderYearView() : ''}
+
+    ${!yearViewOpen ? `
     <div class="card vault">
       <div class="vault-top">
         <div class="vault-label">Obiettivo di risparmio</div>
@@ -825,6 +912,7 @@ async function render(){
         ${histView==='risparmio' ? '— linea tratteggiata: obiettivo mensile ('+fmtCHF(goal)+')' : '<span style="color:var(--mint);">■</span> entrate &nbsp; <span style="color:var(--coral);">■</span> uscite'}
       </div>
     </div>
+    ` : ''}
   `;
 
   attachHandlers();
@@ -1047,6 +1135,15 @@ function attachHandlers(){
     }
   };
   document.getElementById('prevMonth').onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,-1); render(); };
+
+  const toggleYearViewBtn = document.getElementById('toggleYearView');
+  if(toggleYearViewBtn){
+    toggleYearViewBtn.onclick = ()=>{ yearViewOpen = !yearViewOpen; render(); };
+  }
+  const prevYearBtn = document.getElementById('prevYear');
+  if(prevYearBtn){ prevYearBtn.onclick = ()=>{ currentYear--; render(); }; }
+  const nextYearBtn = document.getElementById('nextYear');
+  if(nextYearBtn){ nextYearBtn.onclick = ()=>{ currentYear++; render(); }; }
   document.getElementById('nextMonth').onclick = ()=>{ resetArmed=false; currentMonth = shiftMonth(currentMonth,1); render(); };
 
   document.querySelectorAll('#typeSegmented button').forEach(btn=>{
