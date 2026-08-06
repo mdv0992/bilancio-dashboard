@@ -173,6 +173,33 @@ form.entry-form select:focus, form.entry-form input:focus{outline:none;border-co
 .tx-day-total.pos{color:var(--mint);}
 .tx-day-total.neg{color:var(--coral);}
 
+.tx-search-input{
+  width:100%;background:var(--surface-2);border:1px solid var(--border);color:var(--ink);
+  padding:9px 12px;border-radius:12px;font-family:var(--font-body);font-size:13.5px;margin-bottom:10px;
+}
+.tx-search-input:focus{outline:none;border-color:var(--purple);}
+.tx-week-header{
+  font-size:11.5px;font-weight:700;color:var(--ink-faint);text-transform:uppercase;letter-spacing:0.04em;
+  padding:14px 2px 6px;
+}
+.tx-week-header:first-child{padding-top:2px;}
+.tx-row-wrap{position:relative;overflow:hidden;border-radius:10px;}
+.tx-row-actions{
+  position:absolute;top:0;right:0;bottom:0;display:flex;align-items:stretch;
+}
+.tx-row-actions button{
+  background:var(--coral);color:#fff;border:none;padding:0 18px;font-weight:700;font-size:12.5px;
+  font-family:var(--font-body);cursor:pointer;
+}
+.tx-row-wrap .tx-row{
+  background:var(--surface);position:relative;transition:transform 0.18s ease;touch-action:pan-y;cursor:pointer;
+  border-left:3px solid transparent;padding-left:9px;margin-left:-9px;
+}
+.tx-row-wrap .tx-row.type-exp{border-left-color:var(--coral);}
+.tx-row-wrap .tx-row.type-inc{border-left-color:var(--mint);}
+.tx-row-wrap .tx-row.type-sav{border-left-color:var(--purple);}
+.tx-row-wrap.swiped .tx-row{transform:translateX(-76px);}
+
 .tx-list{}
 .tx-row{display:flex;justify-content:space-between;align-items:center;padding:11px 2px;border-bottom:1px solid var(--border);}
 .tx-row:last-child{border-bottom:none;}
@@ -265,10 +292,13 @@ const DEFAULT_CATS = {
 const REFRESH_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>`;
 const CHECK_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
 
-const APP_VERSION = '2026-08-04.4';
+const APP_VERSION = '2026-08-04.5';
 let updateAvailable = false;
 let refreshState = 'idle';
 let txVisibleCount = 8;
+let txFilter = 'all';
+let txSearch = '';
+let swipedRowId = null;
 let settings = {savingsGoal:1000, dailyBudget:25, sheetUrl:'', sheetKey:''};
 let currentMonth = monthKey(new Date());
 let selectedType = 'uscita';
@@ -559,6 +589,23 @@ function computeYearData(year){
   return {totals, months, catEntries};
 }
 
+function mondayOf(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const day = d.getDay();
+  const diff = (day===0 ? -6 : 1-day);
+  d.setDate(d.getDate()+diff);
+  return d;
+}
+function formatWeekLabel(monday){
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate()+6);
+  const monthShort = (d)=> d.toLocaleDateString('it-CH',{month:'short'}).replace('.','');
+  if(monday.getMonth()===sunday.getMonth()){
+    return `${monday.getDate()}–${sunday.getDate()} ${monthShort(monday)}`;
+  }
+  return `${monday.getDate()} ${monthShort(monday)} – ${sunday.getDate()} ${monthShort(sunday)}`;
+}
+
 function formatDayHeader(dateStr){
   const d = new Date(dateStr+'T00:00:00');
   const label = d.toLocaleDateString('it-CH', {weekday:'long', day:'numeric', month:'long'});
@@ -569,25 +616,43 @@ function renderTxGrouped(entries){
   const sorted = entries.slice().sort((a,b)=>b.date.localeCompare(a.date) || 0);
   const visible = sorted.slice(0, txVisibleCount);
   const remaining = sorted.length - visible.length;
-  const rows = visible.map(e=>`
-      <div class="tx-row" data-id="${e.id}">
-        <div class="tx-left">
-          <div class="tx-avatar" style="background:${catColor(e.type,e.category)};">${initials(e.category)}</div>
-          <div class="tx-info">
-            <span class="tx-cat">${e.category}${e.note?' · '+e.note:''}</span>
-            <span class="tx-date">${e.date}</span>
+
+  const weeks = [];
+  visible.forEach(e=>{
+    const monday = mondayOf(e.date);
+    const key = monday.toISOString().slice(0,10);
+    let w = weeks.find(w=>w.key===key);
+    if(!w){ w = {key, monday, items:[]}; weeks.push(w); }
+    w.items.push(e);
+  });
+
+  const typeClass = (t)=> t==='uscita'?'type-exp':t==='entrata'?'type-inc':'type-sav';
+
+  const body = weeks.map(w=>{
+    const rows = w.items.map(e=>`
+      <div class="tx-row-wrap" data-wrap-id="${e.id}">
+        <div class="tx-row-actions"><button data-del="${e.id}">Elimina</button></div>
+        <div class="tx-row ${typeClass(e.type)}" data-id="${e.id}" data-edit="${e.id}">
+          <div class="tx-left">
+            <div class="tx-avatar" style="background:${catColor(e.type,e.category)};">${initials(e.category)}</div>
+            <div class="tx-info">
+              <span class="tx-cat">${e.category}${e.note?' · '+e.note:''}</span>
+              <span class="tx-date">${e.date}</span>
+            </div>
+          </div>
+          <div class="tx-right">
+            <span class="tx-amount ${e.type==='uscita'?'exp':e.type==='entrata'?'inc':'sav'}">${e.type==='uscita'?'-':'+'}${fmtCHF(e.amount)}</span>
           </div>
         </div>
-        <div class="tx-right">
-          <span class="tx-amount ${e.type==='uscita'?'exp':e.type==='entrata'?'inc':'sav'}">${e.type==='uscita'?'-':'+'}${fmtCHF(e.amount)}</span>
-          <button class="tx-del" data-edit="${e.id}" title="Modifica">✎</button>
-          <button class="tx-del" data-del="${e.id}" title="Elimina">×</button>
-        </div>
       </div>`).join('');
+    return `<div class="tx-week-header">${formatWeekLabel(w.monday)}</div>${rows}`;
+  }).join('');
+
   const moreBtn = remaining>0
-    ? `<button type="button" class="fixed-add-btn" id="showMoreTxBtn" style="width:100%;text-align:center;margin-top:6px;">Mostra altri ${Math.min(remaining,10)} movimenti (${remaining} rimanenti)</button>`
-    : (txVisibleCount>8 ? `<button type="button" class="fixed-add-btn" id="showLessTxBtn" style="width:100%;text-align:center;margin-top:6px;">Mostra meno</button>` : '');
-  return rows + moreBtn;
+    ? `<button type="button" class="fixed-add-btn" id="showMoreTxBtn" style="width:100%;text-align:center;margin-top:10px;">Mostra altri ${Math.min(remaining,10)} movimenti (${remaining} rimanenti)</button>`
+    : (txVisibleCount>8 ? `<button type="button" class="fixed-add-btn" id="showLessTxBtn" style="width:100%;text-align:center;margin-top:10px;">Mostra meno</button>` : '');
+
+  return (visible.length ? body : '<div class="tx-empty">Nessun movimento trovato con questi filtri.</div>') + moreBtn;
 }
 
 function donutSVG(catEntries){
@@ -939,8 +1004,21 @@ async function render(){
 
     <div class="card">
       <h2>Movimenti di ${monthLabel(currentMonth)}</h2>
+      <input type="text" id="txSearchInput" class="tx-search-input" placeholder="Cerca per categoria o nota…" value="${txSearch}">
+      <div class="segmented" style="margin-bottom:14px;">
+        <button type="button" data-txfilter="all" class="${txFilter==='all'?'active':''}" style="font-size:12px;">Tutti</button>
+        <button type="button" data-txfilter="uscita" class="${txFilter==='uscita'?'active':''}" style="font-size:12px;">Uscite</button>
+        <button type="button" data-txfilter="entrata" class="${txFilter==='entrata'?'active':''}" style="font-size:12px;">Entrate</button>
+        <button type="button" data-txfilter="risparmio" class="${txFilter==='risparmio'?'active':''}" style="font-size:12px;">Risparmio</button>
+      </div>
       <div class="tx-list" id="txList">
-        ${entries.length ? renderTxGrouped(entries) : '<div class="tx-empty">Ancora nessun movimento. Aggiungine uno qui sopra.</div>'}
+        ${(()=>{
+          const filtered = entries.filter(e=>
+            (txFilter==='all' || e.type===txFilter) &&
+            (!txSearch || (e.category+' '+(e.note||'')).toLowerCase().includes(txSearch.toLowerCase()))
+          );
+          return filtered.length ? renderTxGrouped(filtered) : '<div class="tx-empty">Nessun movimento trovato.</div>';
+        })()}
       </div>
     </div>
 
@@ -1307,8 +1385,55 @@ function attachHandlers(){
   const showLessTxBtn = document.getElementById('showLessTxBtn');
   if(showLessTxBtn){ showLessTxBtn.onclick = ()=>{ txVisibleCount = 8; render(); }; }
 
+  const txSearchInputEl = document.getElementById('txSearchInput');
+  if(txSearchInputEl){
+    txSearchInputEl.oninput = (e)=>{
+      txSearch = e.target.value;
+      clearTimeout(window.__txSearchDebounce);
+      window.__txSearchDebounce = setTimeout(()=>{
+        render();
+        const el = document.getElementById('txSearchInput');
+        if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+      }, 250);
+    };
+  }
+  document.querySelectorAll('[data-txfilter]').forEach(btn=>{
+    btn.onclick = ()=>{
+      txFilter = btn.getAttribute('data-txfilter');
+      txVisibleCount = 8;
+      render();
+    };
+  });
+
+  let lastSwipeTime = 0;
+  document.querySelectorAll('.tx-row-wrap').forEach(wrap=>{
+    const row = wrap.querySelector('.tx-row');
+    const id = wrap.getAttribute('data-wrap-id');
+    if(!row) return;
+    if(swipedRowId === id) wrap.classList.add('swiped');
+    let startX = null;
+    row.addEventListener('touchstart', (e)=>{ startX = e.touches[0].clientX; }, {passive:true});
+    row.addEventListener('touchend', (e)=>{
+      if(startX===null) return;
+      const endX = (e.changedTouches && e.changedTouches[0].clientX) || startX;
+      const delta = endX - startX;
+      startX = null;
+      if(delta < -35 && swipedRowId!==id){
+        swipedRowId = id; lastSwipeTime = Date.now(); render();
+      } else if(delta > 35 && swipedRowId===id){
+        swipedRowId = null; lastSwipeTime = Date.now(); render();
+      }
+    });
+  });
+
   document.querySelectorAll('[data-edit]').forEach(btn=>{
     btn.onclick = async ()=>{
+      if(Date.now() - lastSwipeTime < 300) return;
+      const wrap = btn.closest('.tx-row-wrap');
+      const wrapId = wrap ? wrap.getAttribute('data-wrap-id') : null;
+      if(wrap && swipedRowId===wrapId){
+        swipedRowId = null; render(); return;
+      }
       const id = btn.getAttribute('data-edit');
       const arr = await loadMonthEntries(currentMonth);
       const entry = arr.find(x=>x.id===id);
